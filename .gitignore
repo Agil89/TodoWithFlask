@@ -1,0 +1,10 @@
+.idea/
+.vscode/
+pycache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+docs/_build/
+dist/
+venv/
