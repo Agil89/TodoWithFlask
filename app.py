@@ -11,6 +11,7 @@ from werkzeug.security import generate_password_hash
 from werkzeug.security import check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required,decode_token
 from flask_jwt_extended.utils import decode_token
+from sqlalchemy import desc 
 from math import ceil
 
 import json
@@ -44,6 +45,7 @@ class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     text = db.Column(db.Text)
     email = db.Column(db.Text, nullable=True)
+    username = db.Column(db.Text, nullable=True)
     status = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     user = db.relationship('User', backref='tasks')
@@ -86,38 +88,28 @@ def logout():
     flash('Logged out successfully!', 'success')
     return redirect(url_for('login'))
 
-@app.route('/tasks', methods=['GET', 'POST'])
-def tasks():
-    page = request.args.get(get_page_parameter(), type=int, default=1)
-    per_page = 3
-    tasks_pagination = Task.query.paginate(page=page, per_page=per_page, error_out=False)
-    total_tasks = tasks_pagination.total
-    total_pages = ceil(total_tasks / per_page)
-    tasks_list = [{'id': task.id, 'text': task.text, 'email': task.email, 'status': task.status, 'user': task.user.username if task.user else None} for task in tasks_pagination.items]
-    return jsonify({'tasks': tasks_list, 'total_pages': total_pages})
-
 @app.route('/create_task', methods=['POST'])
 def create_task():
     data = json.loads(request.data)
     jwt_token = request.headers.get('Authorization')
     user = None
     text = data["text"]
+    username = data["username"]
+    email = data["email"]
     status = bool(int(data["status"]))
-    if jwt_token:
-        user_id = get_user_from_jwt_token(jwt_token)
-        print(user_id)
-        user = User.query.filter_by(username=user_id).first()
-        print(user)
-    new_task = Task(text=text, status=status,user=user)
+    new_task = Task(text=text, status=status,user=user,username=username,email=email)
     db.session.add(new_task)
     db.session.commit()
+    
     total_tasks = Task.query.count()
     per_page = 3
     total_pages = ceil(total_tasks / per_page)
     
     page = request.args.get(get_page_parameter(), type=int, default=1)
-    tasks_pagination = Task.query.paginate(page=page, per_page=per_page, error_out=False)
-    tasks_list = [{'id': task.id, 'text': task.text, 'email': task.email, 'status': task.status} for task in tasks_pagination.items]
+    
+    tasks_pagination = Task.query.order_by(desc(Task.id)).paginate(page=page, per_page=per_page, error_out=False)
+    
+    tasks_list = [{'id': task.id, 'text': task.text, 'email': task.email, 'status': task.status, 'username': task.username} for task in tasks_pagination.items]
     
     return jsonify({'tasks': tasks_list, 'total_pages': total_pages})
 
@@ -129,23 +121,41 @@ def update_task(task_id):
     data = json.loads(request.data.decode('utf-8'))
     status = data['status']
     text = data['text']
+    email = data["email"]
+    username = data["username"]
     if not task:
         return jsonify(({'error': 'Task not found'}), 404)
     status = bool(int(status))
     task.text = text
+    task.email = email
+    task.username = username
     task.status = status
     db.session.commit()
-    task = {'id': task.id, 'text': task.text, 'email': task.email, 'status': task.status}
+    task = {'id': task.id, 'text': task.text, 'email': task.email, 'status': task.status,'username':task.username}
     return jsonify({'success': True, 'message': 'Task updated',"task":task})
 
 @app.route('/get_tasks', methods=['GET'])
 def get_tasks_by_page():
     page = request.args.get('page', 1, type=int)
+    sorted_by = request.args.get('sort', None, type=str)
     per_page = 3
-    tasks_pagination = Task.query.paginate(page=page, per_page=per_page, error_out=False)
+
+    sort_mapping = {
+        'email': Task.email,
+        'username': Task.username,
+        'status': Task.status,
+        'default': Task.id.desc()
+    }
+
+    if sorted_by and sorted_by in sort_mapping:
+        sorting_field = sort_mapping[sorted_by]
+        tasks_pagination = Task.query.order_by(sorting_field).paginate(page=page, per_page=per_page, error_out=False)
+    else:
+        tasks_pagination = Task.query.order_by(Task.id.desc()).paginate(page=page, per_page=per_page, error_out=False)
+
     total_tasks = tasks_pagination.total
     total_pages = ceil(total_tasks / per_page)
-    tasks_list = [{'id': task.id, 'text': task.text, 'email': task.email, 'status': task.status, 'user': task.user.username if task.user else None} for task in tasks_pagination.items]
+    tasks_list = [{'id': task.id, 'text': task.text, 'email': task.email, 'status': task.status, 'username': task.username} for task in tasks_pagination.items]
     return jsonify({'tasks': tasks_list, 'total_pages': total_pages})
 
 @jwt_required()
@@ -158,4 +168,4 @@ def get_user_from_jwt_token(jwt_token):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True,port=5002)
+    app.run(debug=True,port=5000,host='0.0.0.0')
